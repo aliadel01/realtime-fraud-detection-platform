@@ -10,7 +10,7 @@ The decision is made by a machine learning model trained on highly imbalanced da
 
 You can read more about problem definition, source systems, decision model & storage in the [01_Problem_Definition](docs/01_problem_definition.md) document.
 
-> [!IMPORTANT]
+> [!IMPORTANT] Note
 > This project isn't a set of streaming tools wired together. It's built around simulating the engineering problems a production real-time system actually faces — **late and out-of-order data**, **failures and restarts**, **feature staleness**, and **imbalanced data** — and solving each one deliberately, with evidence. A personal project can't fully reproduce production conditions, but this one is built to get close enough that these problems are real and testable, not assumed away.
 
 ## Success Criteria
@@ -45,7 +45,7 @@ You can read more about problem definition, source systems, decision model & sto
 
 **Training/serving consistency**: A sample of live-scored transactions is periodically compared against offline batch scoring on the same events, to confirm the online feature path produces the same values as the training path (catches skew introduced by pipeline bugs, not just staleness).
 
-> [!WARNING]
+> [!WARNING] Remember
 > Define what actually passes the success criteria after finishing the project [Success Criteria](docs/success_criteria.md) document. 
 
 

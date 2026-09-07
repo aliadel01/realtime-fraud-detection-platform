@@ -1,0 +1,196 @@
+version: "3.7"
+
+networks:
+  streaming-net:
+    driver: bridge
+
+volumes:
+  redpanda-0-data:
+  redpanda-1-data:
+  redpanda-2-data:
+
+services:
+  # --- Redpanda Broker 0 ---
+  redpanda-0:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: redpanda-0
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - "1G"
+      - --reserve-memory
+      - "0M"
+      - --node-id
+      - "0"
+      - --check=false
+      - --seeds
+      - "redpanda-0:33145,redpanda-1:33145,redpanda-2:33145"
+      - --kafka-addr
+      - "plaintext://0.0.0.0:29092,external://0.0.0.0:9092"
+      - --advertise-kafka-addr
+      - "plaintext://redpanda-0:29092,external://localhost:9092"
+      - --rpc-addr
+      - "0.0.0.0:33145"
+      - --advertise-rpc-addr
+      - "redpanda-0:33145"
+    volumes:
+      - redpanda-0-data:/var/lib/redpanda/data
+    ports:
+      - "9092:9092"
+    networks:
+      - streaming-net
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --- Redpanda Broker 1 ---
+  redpanda-1:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: redpanda-1
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - "1G"
+      - --reserve-memory
+      - "0M"
+      - --node-id
+      - "1"
+      - --check=false
+      - --seeds
+      - "redpanda-0:33145,redpanda-1:33145,redpanda-2:33145"
+      - --kafka-addr
+      - "plaintext://0.0.0.0:29092,external://0.0.0.0:9093"
+      - --advertise-kafka-addr
+      - "plaintext://redpanda-1:29092,external://localhost:9093"
+      - --rpc-addr
+      - "0.0.0.0:33145"
+      - --advertise-rpc-addr
+      - "redpanda-1:33145"
+    volumes:
+      - redpanda-1-data:/var/lib/redpanda/data
+    ports:
+      - "9093:9093"
+    networks:
+      - streaming-net
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      timeout: 5s
+      retries: 10
+
+  # --- Redpanda Broker 2 ---
+  redpanda-2:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: redpanda-2
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - "1G"
+      - --reserve-memory
+      - "0M"
+      - --node-id
+      - "2"
+      - --check=false
+      - --seeds
+      - "redpanda-0:33145,redpanda-1:33145,redpanda-2:33145"
+      - --kafka-addr
+      - "plaintext://0.0.0.0:29092,external://0.0.0.0:9094"
+      - --advertise-kafka-addr
+      - "plaintext://redpanda-2:29092,external://localhost:9094"
+      - --rpc-addr
+      - "0.0.0.0:33145"
+      - --advertise-rpc-addr
+      - "redpanda-2:33145"
+    volumes:
+      - redpanda-2-data:/var/lib/redpanda/data
+    ports:
+      - "9094:9094"
+    networks:
+      - streaming-net
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --- Topic Initialization Service ---
+  topic-init:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: topic-init
+    networks:
+      - streaming-net
+    depends_on:
+      redpanda-0:
+        condition: service_healthy
+      redpanda-1:
+        condition: service_healthy
+      redpanda-2:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        rpk topic create transactions.raw --partitions 6 --replicas 3 \
+          --brokers redpanda-0:29092,redpanda-1:29092,redpanda-2:29092 || true
+        rpk topic create identities.raw --partitions 6 --replicas 3 \
+          --brokers redpanda-0:29092,redpanda-1:29092,redpanda-2:29092 || true
+    restart: "no"
+
+  # --- Redpanda Console ---
+  console:
+    image: docker.redpanda.com/redpandadata/console:latest
+    container_name: redpanda-console
+    entrypoint: /bin/sh -c "sleep 5 && /app/console"
+    environment:
+      - KAFKA_BROKERS=redpanda-0:29092,redpanda-1:29092,redpanda-2:29092
+    ports:
+      - "8080:8080"
+    networks:
+      - streaming-net
+    depends_on:
+      - redpanda-0
+      - redpanda-1
+      - redpanda-2
+
+  # --- Data Producers ---
+  payment-gateway:
+    build: services/data-simulator
+    command: python payment_gateway_producer.py
+    environment:
+      - TRANSACTIONS_PATH=/app/data/train_transaction.csv
+      - KAFKA_BROKER=redpanda-0:29092,redpanda-1:29092,redpanda-2:29092
+    networks:
+      - streaming-net
+    volumes:
+      - ./data/train_transaction.csv:/app/data/train_transaction.csv
+    depends_on:
+      topic-init:
+        condition: service_completed_successfully
+
+  identity-risk:
+    build: services/data-simulator
+    command: python identity_risk_producer.py
+    environment:
+      - IDENTITIES_PATH=/app/data/train_identity.csv
+      - TRANSACTIONS_PATH=/app/data/train_transaction.csv
+      - KAFKA_BROKER=redpanda-0:29092,redpanda-1:29092,redpanda-2:29092
+    networks:
+      - streaming-net
+    volumes:
+      - ./data/train_identity.csv:/app/data/train_identity.csv
+      - ./data/train_transaction.csv:/app/data/train_transaction.csv
+    depends_on:
+      topic-init:
+        condition: service_completed_successfully
