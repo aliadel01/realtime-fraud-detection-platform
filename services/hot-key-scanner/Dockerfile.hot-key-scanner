@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+# librdkafka needed for confluent-kafka (C extension)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc librdkafka-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY detect_hot_keys.py .
+COPY hot_key_utils.py .
+
+# No CMD/ENTRYPOINT default — this image is run on-demand with an
+# explicit command, e.g.:
+#   docker compose run --rm hot-key-scanner \
+#     python detect_hot_keys.py --mode detect --topic transactions.raw --partition 3

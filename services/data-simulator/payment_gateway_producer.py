@@ -16,8 +16,7 @@ event-time — trace/debug without touching payload schema.
 Env-independent config: TRANSACTIONS_PATH, KAFKA_BROKER hardcoded here for
 local sim (redpanda 3-broker cluster). Swap to os.environ for prod deploy.
 
-Known gap: no schema registry yet (raw JSON, bronze layer). No hot-key
-salting yet (add build_key() + hot_keys.json once monitoring detect skew).
+Hot-key salting: build_key() from hot_key_utils — detect skewed card1, add salt to key to spread load across partitions.
 """
 
 import os
@@ -26,6 +25,7 @@ import time
 import logging
 import pandas as pd
 import uuid
+from hot_key_utils import build_key
 from confluent_kafka import Producer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -81,8 +81,8 @@ def run():
             if delta > 0:
                 time.sleep(delta)
         prev_dt = current_dt
-
-        card_key = str(row["card1"]) if pd.notnull(row["card1"]) else str(row["TransactionID"])
+    
+        card_key = build_key(str(row["card1"])) if pd.notnull(row["card1"]) else str(row["TransactionID"])
         
         producer.produce(
             TOPIC,

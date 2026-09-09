@@ -18,8 +18,7 @@ Durability: acks=all + enable.idempotence=True + max.in.flight<=5.
 
 Headers attach lineage: source-service, run-id, schema-version, event-time.
 
-Known gap: no schema registry yet. No hot-key salting yet (card1 skew
-same risk as payment-gateway — apply same build_key() fix when ready).
+Hot-key salting: build_key() from hot_key_utils — detect skewed card1, add salt to key to spread load across partitions.
 """
 import os
 import json
@@ -27,6 +26,7 @@ import time
 import logging
 import pandas as pd
 import uuid
+from hot_key_utils import build_key
 from confluent_kafka import Producer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -95,7 +95,7 @@ def run():
             prev_dt = current_dt
 
         # orphan record: no card1 match, use TransactionID as fallback key
-        card_key = str(row["card1"]) if pd.notnull(row["card1"]) else str(row["TransactionID"])
+        card_key = build_key((str(row["card1"]))) if pd.notnull(row["card1"]) else str(row["TransactionID"])
 
         # drop join-only helper cols before sending, keep payload true to source
         payload_row = row.drop(labels=["TransactionDT", "card1"])

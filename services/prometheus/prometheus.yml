@@ -1,0 +1,4 @@
+scrape_configs:
+  - job_name: redpanda
+    static_configs:
+      - targets: ["redpanda-0:9644", "redpanda-1:9644", "redpanda-2:9644"]
