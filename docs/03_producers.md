@@ -41,7 +41,8 @@ We add headers to each message to help with debugging and tracking: `source-serv
 ### Partition count + local multi-broker simulation
 
 Formula:
-$$\text{partitions} = \max\left(\frac{\text{target\_throughput}}{\text{per\_partition\_producer\_throughput}}, \frac{\text{target\_throughput}}{\text{per\_partition\_consumer\_throughput}}\right)$$
+
+$$\text{partitions} = \max\left(\frac{\text{target throughput}}{\text{per partition producer throughput}}, \frac{\text{target throughput}}{\text{per partition consumer throughput}}\right)$$
 
  We need to avoid resharding in production, so we need to pick a partition count that is high enough to handle expected load see [Hot Key Risk and Data Skew — A. Partition Count](00_technical_challenges.md#our-solution). We pick 12 Partitions (Over-Provisioning Partitions) cheap now, expensive later
 

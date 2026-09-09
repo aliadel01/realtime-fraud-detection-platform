@@ -113,7 +113,7 @@ python detect_hot_keys.py --mode demote --topic X \
 9. `y` → removes and writes the file. Anything else → aborts, no write.
 
 
-> [!NOTE] Note
+> [!NOTE] 
 > Salting intentionally breaks per-partition physical order for a hot key. Consumers must key-by the raw (unsalted) `card1` and use a bounded-out-of-orderness event-time window in Flink to reconstruct true per-card order before fraud sequence detection runs. The watermark bound is a latency/correctness tradeoff and should be sized from observed lag, not assumed.
 > 
 > If the script finds no key above threshold in a flagged partition, the heaviness is likely caused by Murmur2 hash collision among several medium-volume keys — not a single hot key. Salting will not help this case. Escalate for partition-count review instead.
@@ -128,7 +128,7 @@ If a hot key is persistent and structural (e.g., a massive corporate account), w
 
 Isolating a heavy key to a dedicated partition requires allocating sufficient consumer capacity (or a dedicated consumer thread) to handle that specific partition's write load without introducing lag.
 
-> [!IMPORTANT] Decision Order Between the Three Solutions
+> [!IMPORTANT] 
 > Partition count = the baseline, always active. Salting = the default reactive fix. Dedicated partition = only used when the same key stays hot across two or more scans (a chronic problem, not a short burst).
 
 ### Example Runs
