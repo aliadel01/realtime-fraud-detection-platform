@@ -15,7 +15,6 @@ You can read more about problem definition, source systems, decision model & sto
 
 ## Success Criteria
 
-### 1. Systems Criteria
 
 **Latency**: **p99 <100ms** per transaction, including all processing and model scoring, measured under the maximum sustained throughput the deployed infrastructure can handle (see Throughput below). Average latency reported as a secondary metric, not the primary target.
 
@@ -33,20 +32,7 @@ You can read more about problem definition, source systems, decision model & sto
 
 **Idempotent writes**: Replaying the same Kafka offset range twice produces **zero** duplicate rows in Iceberg, verified by row count and primary key check.
 
-### 2. ML Criteria
-
-**Discrimination performance**: F1 ≥ 0.8 on a held-out test set, with precision and recall both ≥ 0.75.
-
-**Operating threshold**: The classification threshold is chosen against the precision/recall curve using an explicitly stated cost assumption (e.g. cost of a missed fraud case vs. cost of a false block), not left at the default 0.5 — and that assumption is documented, not just the resulting threshold.
-
-**Imbalance handling**: The chosen imbalance strategy (class weighting or resampling — pick one, justify against the other) is compared against a naive baseline (no imbalance handling) on the same test set, with both results reported, so the improvement is evidence-backed, not assumed.
-
-**Robustness**: F1 score does not degrade by more than 5% (relative) when evaluated on a test set with injected noise and randomly dropped features, compared to the clean test set.
-
-**Training/serving consistency**: A sample of live-scored transactions is periodically compared against offline batch scoring on the same events, to confirm the online feature path produces the same values as the training path (catches skew introduced by pipeline bugs, not just staleness).
-
-> [!WARNING] Remember
-> Define what actually passes the success criteria after finishing the project [Success Criteria](docs/success_criteria.md) document. 
 
 
 ## Architecture
+
