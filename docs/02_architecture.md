@@ -6,6 +6,7 @@
 - [Architecture Decisions and trade-offs](#architecture-decisions-and-trade-offs)
   - [Table of Contents](#table-of-contents)
   - [Architecture Diagram](#architecture-diagram)
+    - [Storage](#storage)
   - [ADRs and Trade-offs](#adrs-and-trade-offs)
     - [ADR-01: Iceberg (not plain data lake or Delta Lake)](#adr-01-iceberg-not-plain-data-lake-or-delta-lake)
     - [ADR-02: Redis for the online feature store](#adr-02-redis-for-the-online-feature-store)
@@ -17,6 +18,18 @@
 The architecture diagram will be added at the end of the project.
 
 > The architecture logic is complete and ready to be added, but the diagram's visual presentation is not yet finalized.
+
+
+### Storage
+
+built 3 service containers for storage, each with a specific role in the architecture:
+* **`minio`:** Acts as the physical object storage for Iceberg tables, holding both the underlying data files (Parquet) and table metadata (`.metadata.json`, manifest lists, and manifests).
+* **`iceberg-catalog`:** The Iceberg REST catalog interface that compute engines like Flink or Spark query to resolve table locations, schema definitions, and snapshot versions.
+* **`minio-init`:** An initialization container that automatically provisions the target S3 bucket (`iceberg-warehouse`) on first startup. Without this step, `iceberg-catalog` fails to initialize because its warehouse target path does not exist.
+
+
+
+
 ## ADRs and Trade-offs
 
 ### ADR-01: Iceberg (not plain data lake or Delta Lake)

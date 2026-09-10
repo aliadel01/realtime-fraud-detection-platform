@@ -8,6 +8,8 @@ volumes:
   redpanda-2-data:
   grafana-data:
   hot-keys-data:
+  minio-data:
+  iceberg-catalog-data:
 
 services:
   # --- Redpanda Broker 0 ---
@@ -236,3 +238,62 @@ services:
       - redpanda-0
       - redpanda-1
       - redpanda-2
+
+
+  # --- MinIO (Iceberg's object storage) ---
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=password
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # MinIO console
+    volumes:
+      - minio-data:/data
+    networks:
+      - streaming-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --- MinIO bucket init (creates the bucket Iceberg writes to) ---
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mc alias set local http://minio:9000 admin password
+        mc mb local/iceberg-warehouse || true
+        exit 0
+    networks:
+      - streaming-net
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  # --- Iceberg REST Catalog ---
+  iceberg-catalog:
+    image: tabulario/iceberg-rest:latest
+    container_name: iceberg-catalog
+    environment:
+      - CATALOG_WAREHOUSE=s3://iceberg-warehouse/
+      - CATALOG_IO__IMPL=org.apache.iceberg.aws.s3.S3FileIO
+      - CATALOG_S3_ENDPOINT=http://minio:9000
+      - CATALOG_S3_PATH__STYLE__ACCESS=true
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=password
+      - AWS_REGION=us-east-1
+    ports:
+      - "8181:8181"
+    volumes:
+      - iceberg-catalog-data:/data
+    networks:
+      - streaming-net
+    depends_on:
+      - minio-init

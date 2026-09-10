@@ -22,7 +22,9 @@ This runbook explains how to run the full project, step by step.
 - prometheus
 - grafana
 - hot-key-scanner (on-demand only, via `--profile tools`)
-
+- minio (object storage)
+- minio-init (creates the bucket Iceberg writes to)
+- iceberg-catalog (Iceberg REST Catalog)
 ### Start the environment
 
 Start all services in the background:
