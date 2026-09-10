@@ -118,7 +118,7 @@ python detect_hot_keys.py --mode demote --topic X \
 > 
 > If the script finds no key above threshold in a flagged partition, the heaviness is likely caused by Murmur2 hash collision among several medium-volume keys — not a single hot key. Salting will not help this case. Escalate for partition-count review instead.
 
-> See the technical details and reload mechanism in [Semi-Automatic Hot Key Detection and Salting](03_producers.md#producer-side-hot-key-reload) for the producer-side implementation.
+> See the technical details and reload mechanism in [Semi-Automatic Hot Key Detection and Salting](03_source_systems.md#producer-side-hot-key-reload) for the producer-side implementation.
 
 
 

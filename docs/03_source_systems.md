@@ -7,7 +7,10 @@
     - [Configuration Choices](#configuration-choices)
     - [Partition count + local multi-broker simulation](#partition-count--local-multi-broker-simulation)
     - [Producer-Side Hot Key Reload](#producer-side-hot-key-reload)
-  - [Summary](#summary)
+  - [Data Restructuring: Transaction, User Reference, and Merchant Data](#data-restructuring-transaction-user-reference-and-merchant-data)
+    - [Why We Split the Data](#why-we-split-the-data)
+    - [Current Version: Keep It Simple](#current-version-keep-it-simple)
+    - [Next Step: Orchestration and Real-Time Updates](#next-step-orchestration-and-real-time-updates)
 
 ## Transaction events producer (simulate payment gateway) and Identity risk producer
 
@@ -112,6 +115,44 @@ This avoids needing file locking between the writer (`detect_hot_keys.py`, run m
 | `MTIME_CHECK_INTERVAL_SEC` | `5` | How often the cheap `stat` check runs. Lower = faster pickup, more syscalls; higher = the reverse. 5s balances both without needing tuning. |
 
 
+## Data Restructuring: Transaction, User Reference, and Merchant Data
 
+### Why We Split the Data
 
-## Summary
+The original dataset (`train_transaction.csv`) comes from Kaggle as one flat file. All transaction data, user information, and merchant information are mixed together in the same table.
+
+This is not how a real production fraud detection system looks. In a real system (see [01_Problem_Definition](01_problem_definition.md#source-systems)), transaction events, user reference data, and merchant data come from **different source systems**:
+
+- **Transaction events** come from the payment gateway, in real time.
+- **User reference data** (card info, address, email) comes from a CRM system, updated daily.
+- **Merchant data** (merchant risk score) comes from a merchant management system, also updated daily.
+
+These systems are separate in real life. They have different owners, different update speeds, and different infrastructure. If we keep everything in one flat table, we lose this structure, and we cannot simulate the real architecture our project is built around (see [ADR-04](02_architecture.md#adr-04-why-using-broadcast-state-for-reference-data)).
+
+So we split the flat Kaggle data into three parts, to simulate three separate source systems:
+
+1. **`train_transaction_fact.csv`** — the transaction stream. Contains only fast-changing, per-event data (amount, product code, engineered V/C/D features, identity/device info).
+2. **`user_reference.csv`** — a dimension table with slow-changing user/card attributes (card type, address, email domain).
+3. **`merchant_data.csv`** — a dimension table with merchant risk information (fraud rate per product category).
+
+Each transaction record has a foreign key (`user_reference_sk`, `merchant_data_sk`) pointing to the correct row in each dimension table. This is the same join pattern the real system will use: Flink reads the transaction stream and joins it with reference data through broadcast state, instead of one large merged table.
+
+### Current Version: Keep It Simple
+
+Right now, `user_reference.csv` and `merchant_data.csv` each store **only the latest known state** for every user (`card1`) or merchant category (`ProductCD`). There is no history and no versioning yet.
+
+We chose this simple version first because:
+- It is enough to build and test the first working pipeline end-to-end (data split → features → model → ONNX export).
+- It avoids extra complexity before the rest of the system (Flink, Feast, broadcast state) is working.
+- It matches the project's step-by-step approach: get something simple running correctly first, then improve it.
+
+### Next Step: Orchestration and Real-Time Updates
+
+Later, we will build a separate **orchestration process** that keeps `user_reference` and `merchant_data` up to date automatically, instead of computing them once from a static file.
+
+This orchestration will:
+- Detect real changes in the source data (for example, a card's address changes, or a merchant's fraud rate shifts).
+- Update the reference tables to reflect the current state, similar in spirit to how [`detect_hot_keys.py`](00_technical_challenges.md#c-semi-automatic-flow) already updates `hot_keys.json` on a schedule.
+- Keep each reference table close to real time, so that when a transaction arrives, Flink's broadcast state always reflects the most current known user and merchant state — not an outdated snapshot.
+
+At that point, we will also add proper history tracking (SCD Type 2: `valid_from`, `valid_to`, `is_current`) so we can reconstruct what a user's or merchant's state was at any past point in time — useful for audit and for training data correctness. For now, we keep it simple: current state only, no history.

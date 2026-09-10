@@ -8,6 +8,7 @@
   - [Identity / Device Features](#identity--device-features)
   - [User Reference Features (broadcast state)](#user-reference-features-broadcast-state)
   - [Merchant Reference Features (broadcast state)](#merchant-reference-features-broadcast-state)
+  - [ONNX Runtime](#onnx-runtime)
 
 
 ## ML Model
@@ -54,3 +55,7 @@ This data changes rarely (daily or less), so it fits well as broadcast state —
 - Fraud rate per `ProductCD`, computed once from training history, used as a merchant risk score proxy
 
 This design keeps the hot path fast: transaction and identity data score in real time, while user and merchant data come from a broadcast cache that avoids a slow lookup on every single event.
+
+
+### ONNX Runtime
+Selecting ONNX Runtime (via `onnxruntime-java`) represents the optimal architectural decision. It delivers the ultra-low latency required to meet the project's SLA ($p99 < 100\text{ms}$) and outperforms alternative frameworks without introducing the compilation complexity of C-based runtimes (such as Treelite).
