@@ -53,6 +53,9 @@ services:
     deploy:
       resources:
         limits:
+          # HARD FLOOR: Redpanda is told --memory 1G internally above.
+          # Going below ~1200M risks the broker crashing on startup,
+          # not just running slowly. Don't reduce this one further.
           cpus: "0.75"
           memory: 1200M
 
@@ -188,7 +191,7 @@ services:
       resources:
         limits:
           cpus: "0.25"
-          memory: 256M
+          memory: 128M
 
   # --- Data Producers ---
   payment-gateway:
@@ -210,8 +213,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 512M
+          cpus: "0.25"
+          memory: 256M
 
   identity-risk:
     build: services/data-simulator
@@ -233,8 +236,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 512M
+          cpus: "0.25"
+          memory: 256M
 
   prometheus:
     image: prom/prometheus:latest
@@ -246,8 +249,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 512M
+          cpus: "0.25"
+          memory: 256M
 
   grafana:
     image: grafana/grafana:latest
@@ -259,8 +262,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 512M
+          cpus: "0.25"
+          memory: 256M
 
   hot-key-scanner:
     build:
@@ -286,8 +289,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 512M
+          cpus: "0.25"
+          memory: 256M
 
   # --- MinIO (Iceberg's object storage) ---
   minio:
@@ -312,8 +315,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 512M
+          cpus: "0.25"
+          memory: 256M
 
   # --- MinIO bucket init (creates the bucket Iceberg writes to) ---
   minio-init:
@@ -359,8 +362,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 512M
+          cpus: "0.25"
+          memory: 256M
 
   # =========================================================
   # Option 2 additions: dedicated Flink cluster for the
@@ -403,8 +406,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 1024M
+          # jobmanager coordinates the job graph, it doesn't process
+          # data itself, so this is safe to keep small.
+          cpus: "0.5"
+          memory: 512M
 
   # --- Flink TaskManager ---
   # Scale with: docker compose up -d --scale taskmanager=2
@@ -431,6 +436,10 @@ services:
     deploy:
       resources:
         limits:
+          # HARD FLOOR: this is where RocksDB state and actual stream
+          # processing live. Going much below this risks checkpoint
+          # timeouts and OOM-kills mid-job. Don't reduce this one
+          # without watching `docker compose logs taskmanager` closely.
           cpus: "1.5"
           memory: 1536M
 
@@ -470,5 +479,5 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 512M
+          cpus: "0.25"
+          memory: 256M
