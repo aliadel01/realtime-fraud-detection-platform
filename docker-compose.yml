@@ -50,6 +50,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 1200M
 
   # --- Redpanda Broker 1 ---
   redpanda-1:
@@ -89,6 +94,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 1200M
 
   # --- Redpanda Broker 2 ---
   redpanda-2:
@@ -128,6 +138,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 1200M
 
   # --- Topic Initialization Service ---
   topic-init:
@@ -148,6 +163,11 @@ services:
         rpk topic create transactions.raw --partitions 12 --replicas 3 --brokers redpanda-0:29092,redpanda-1:29092,redpanda-2:29092 || true
         rpk topic create identities.raw --partitions 12 --replicas 3 --brokers redpanda-0:29092,redpanda-1:29092,redpanda-2:29092 || true
     restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
 
   # --- Redpanda Console ---
   console:
@@ -164,6 +184,11 @@ services:
       - redpanda-0
       - redpanda-1
       - redpanda-2
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
 
   # --- Data Producers ---
   payment-gateway:
@@ -182,6 +207,11 @@ services:
     depends_on:
       topic-init:
         condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
 
   identity-risk:
     build: services/data-simulator
@@ -200,6 +230,11 @@ services:
     depends_on:
       topic-init:
         condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
 
   prometheus:
     image: prom/prometheus:latest
@@ -208,6 +243,11 @@ services:
     ports: ["9090:9090"]
     networks:
       - streaming-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
 
   grafana:
     image: grafana/grafana:latest
@@ -216,6 +256,11 @@ services:
     ports: ["3000:3000"]
     networks:
       - streaming-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
 
   hot-key-scanner:
     build:
@@ -238,6 +283,11 @@ services:
       - redpanda-0
       - redpanda-1
       - redpanda-2
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
 
   # --- MinIO (Iceberg's object storage) ---
   minio:
@@ -259,6 +309,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
 
   # --- MinIO bucket init (creates the bucket Iceberg writes to) ---
   minio-init:
@@ -275,6 +330,11 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
 
   # --- Iceberg REST Catalog ---
   iceberg-catalog:
@@ -296,6 +356,11 @@ services:
       - streaming-net
     depends_on:
       - minio-init
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
 
   # =========================================================
   # Option 2 additions: dedicated Flink cluster for the
@@ -335,6 +400,11 @@ services:
     depends_on:
       minio-init:
         condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
 
   # --- Flink TaskManager ---
   # Scale with: docker compose up -d --scale taskmanager=2
@@ -358,6 +428,11 @@ services:
       - streaming-net
     depends_on:
       - jobmanager
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1536M
 
   # --- Bronze Ingestion Job submitter (Kafka -> Iceberg) ---
   # Same pattern as topic-init: build image carries the fat jar,
@@ -392,3 +467,8 @@ services:
         condition: service_completed_successfully
       iceberg-catalog:
         condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
