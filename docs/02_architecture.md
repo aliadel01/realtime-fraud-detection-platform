@@ -13,6 +13,8 @@
     - [ADR-03: Flink (not Spark Structured Streaming)](#adr-03-flink-not-spark-structured-streaming)
     - [ADR-04: Why using broadcast state for reference data](#adr-04-why-using-broadcast-state-for-reference-data)
     - [ADR-05: Feast Push API not two custom consumers](#adr-05-feast-push-api-not-two-custom-consumers)
+    - [ADR-06: Dedicated Flink Job for Iceberg Bronze Ingestion](#adr-06-dedicated-flink-job-for-iceberg-bronze-ingestion)
+    - [ADR-07: Java (not PyFlink) for the bronze-ingestion job](#adr-07-java-not-pyflink-for-the-bronze-ingestion-job)
 
 ## Architecture Diagram
 The architecture diagram will be added at the end of the project.
@@ -91,3 +93,37 @@ built 3 service containers for storage, each with a specific role in the archite
 **Alternative considered**: Two independent consumers. Rejected — while it does offer full manual control over offsets, retries, and per-store tuning, it means running and monitoring two separate consumer processes instead of one integrated path, and a failure in either one can cause the two stores to disagree with no built-in mechanism to detect it. Feast Push API is simpler operationally and removes an entire class of consistency bugs, at the cost of less granular control over each store's write behavior individually.
 
 **Consequences**: Coupled to the Feast SDK's behavior for both stores — if Feast's push mechanism itself has an outage or bug, both stores are affected together rather than just one. This is accepted as a reasonable trade-off: shared-fate coupling is preferable to silent, undetected divergence between two independently-failing paths.
+
+
+### ADR-06: Dedicated Flink Job for Iceberg Bronze Ingestion
+
+**Context**: Ingesting streaming Kafka topics into Apache Iceberg requires batching to avoid the small-file problem and a Two-Phase Commit mechanism to enforce exactly-once processing. Four patterns were evaluated: single job, dedicated Flink job, Kafka Connect, or side-outputs.
+
+**Decision**: Option 2 — Dedicated Flink job for raw Iceberg ingestion.
+
+**Reasoning**: Decouples raw data storage (Bronze layer) from downstream feature transformations. Isolating raw ingestion into its own job ensures that bugs or backpressure in feature computation logic do not halt raw data persistence into Iceberg.
+
+**Alternatives considered**:
+
+* **Options 1 & 4 (Integrated Sink / Side-Output)**: Rejected due to tight operational coupling. Shared execution graphs cause backpressure or errors in feature code to stall raw data ingestion into Iceberg.
+* **Option 3 (Kafka Connect)**: Rejected due to non-atomic offset commits. Kafka Connect decouples table commits from Kafka offset commits; a crash between the two creates duplicates. Flink's checkpointing atomically binds Iceberg snapshot commits to Kafka offsets.
+
+**Consequences**: Adds an extra Kafka consumer group (doubling broker read load for raw topics) and an additional Flink job to monitor. This is an accepted trade-off to guarantee fault isolation and strict exactly-once semantics.
+
+### ADR-07: Java (not PyFlink) for the bronze-ingestion job
+
+**Context:** The bronze-ingestion job (Kafka → Iceberg) needs Flink's `FlinkSink.forRowData()` from the Iceberg-Flink connector, a custom `KafkaRecordDeserializationSchema` that reads partition/offset/headers off the raw `ConsumerRecord`, and RocksDB-backed checkpointing at a 5-second interval. The rest of this project's Python code (`payment_gateway_producer.py`, `identity_risk_producer.py`) exists specifically to use `pandas` for CSV replay and pacing — a justification that does not apply here, since this job does no data-science-style transformation at all.
+
+**Decision:** Write the bronze-ingestion job in Java, using Flink's DataStream API directly.
+
+**Reasoning:**
+
+- **Iceberg's Flink connector is Java-first.** `iceberg-flink-runtime`'s `FlinkSink`, `TableLoader`, and `CatalogLoader` builders are Java/Table-API constructs. PyFlink's DataStream-level support for calling into these builders is thin — the documented, maintained path for Python is the Table/SQL API, not the low-level `RowData` sink builder this job uses to control the exact bronze schema and partition spec.
+- **No Python process boundary for pure I/O plumbing.** PyFlink UDFs execute in a separate Python process, communicating with the JVM over the Beam portability layer — a serialization hop on every record. This job does nothing that needs Python's ecosystem (no `pandas`, no `sklearn`); it deserializes bytes, attaches lineage metadata, and writes rows. Paying the cross-process cost here buys nothing.
+- **Low-level Kafka record access is more mature in Java.** `KafkaRawRecordDeserializer` reads `record.partition()`, `record.offset()`, and `record.headers()` directly off the `ConsumerRecord` — full access needed for the bronze schema's lineage columns (`kafka_partition`, `kafka_offset`, `source_service`, `run_id`, `schema_version`). PyFlink's Kafka source APIs have historically lagged the Java connector on this kind of record-level access.
+- **Debugging stays inside one runtime.** JVM stack traces, thread dumps, and the Flink Web UI's task metrics all point directly at this job's code. A PyFlink job adds a second failure surface (the Python worker process) on top of that, with no corresponding benefit here.
+- **Consistency with ADR-03.** Flink was chosen over Spark specifically for low-latency, per-event, JVM-native processing (ADR-03). Introducing a Python execution layer for one of the two Flink jobs in this project undercuts that reasoning for no gain — this job has none of the pandas/CSV-replay needs that justified Python in the producers.
+
+**Rejected alternative:** *PyFlink DataStream API.* Rejected — would require either dropping to Table/SQL API (losing direct control over the bronze `RowData` schema and hourly partition spec) or bridging to the Java `FlinkSink` builder manually via Py4J, an unsupported and fragile path for a production-grade bronze layer. The producers' use of Python is justified by `pandas`; this job has no equivalent justification.
+
+**Consequences:** The bronze-ingestion job is a separate Maven project (own `pom.xml`, own fat jar) rather than reusing the producers' Python container. This is consistent with Option 2's isolation goal anyway — a completely separate deployable, not just a separate Flink job.

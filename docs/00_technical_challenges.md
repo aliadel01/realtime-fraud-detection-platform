@@ -19,6 +19,7 @@ This document highlights the core system-design challenges, failure modes, and a
       - [C. Semi-Automatic Flow](#c-semi-automatic-flow)
       - [D. Dedicated Partition](#d-dedicated-partition)
     - [Example Runs](#example-runs)
+  - [2. ADRs and Trade-offs between multiple approaches](#2-adrs-and-trade-offs-between-multiple-approaches)
 
 ## delay between two producers
 The separate two systems producer may make Small delays (5ms) fine, even good — mimics production reality, gives Flink job real join problem to solve.
@@ -177,3 +178,5 @@ Remove these from hot_keys.json? [y/N] y
 
 With `--sample-size` this small, every key needs 10 out of 500 messages (2%) to clear the threshold — a demanding bar for any key in a small sample, which is why every tracked key demoted in this run. This is expected behavior for a deliberately small sample, used here to confirm the demotion path (confirm-gate, correct removal, correct file write) works end-to-end — not a real production sample size. Production runs should use a sample size in the tens of thousands, as in the `detect` example above.
 
+
+## 2. ADRs and Trade-offs between multiple approaches

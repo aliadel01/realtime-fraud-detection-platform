@@ -231,14 +231,13 @@ services:
     volumes:
       - hot-keys-data:/app/shared
     networks:
-      - streaming-net  
+      - streaming-net
     stdin_open: true
     tty: true
     depends_on:
       - redpanda-0
       - redpanda-1
       - redpanda-2
-
 
   # --- MinIO (Iceberg's object storage) ---
   minio:
@@ -297,3 +296,99 @@ services:
       - streaming-net
     depends_on:
       - minio-init
+
+  # =========================================================
+  # Option 2 additions: dedicated Flink cluster for the
+  # bronze-ingestion job (Kafka -> Iceberg), independent of
+  # the feature-computation Flink job.
+  # =========================================================
+
+  # --- Flink JobManager (session cluster) ---
+  jobmanager:
+    image: flink:1.18-java17
+    container_name: jobmanager
+    command: jobmanager
+    ports:
+      - "8081:8081"   # Flink Web UI
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        state.backend: rocksdb
+        state.backend.incremental: true
+        state.checkpoints.dir: s3a://iceberg-warehouse/flink-checkpoints/
+        execution.checkpointing.interval: 5000
+        execution.checkpointing.mode: EXACTLY_ONCE
+        execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        s3.access-key: admin
+        s3.secret-key: password
+      # This is a DIFFERENT thing from Iceberg's own S3 access
+      # (iceberg-aws-bundle handles that, inside the job jar).
+      # This env var tells FLINK ITSELF how to understand s3:// URLs
+      # for its own checkpoint storage — without it, checkpointing
+      # to s3://... fails with "no file system for scheme 's3'".
+      - ENABLE_BUILT_IN_PLUGINS=flink-s3-fs-hadoop-1.18.1.jar
+    networks:
+      - streaming-net
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
+  # --- Flink TaskManager ---
+  # Scale with: docker compose up -d --scale taskmanager=2
+  taskmanager:
+    image: flink:1.18-java17
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 2
+        state.backend: rocksdb
+        state.backend.incremental: true
+        state.checkpoints.dir: s3a://iceberg-warehouse/flink-checkpoints/
+        s3.endpoint: http://minio:9000
+        s3.path.style.access: true
+        s3.access-key: admin
+        s3.secret-key: password
+      - ENABLE_BUILT_IN_PLUGINS=flink-s3-fs-hadoop-1.18.1.jar
+    networks:
+      - streaming-net
+    depends_on:
+      - jobmanager
+
+  # --- Bronze Ingestion Job submitter (Kafka -> Iceberg) ---
+  # Same pattern as topic-init: build image carries the fat jar,
+  # submit to the session cluster, then exit. The job itself keeps
+  # running on jobmanager/taskmanager after this container exits.
+  bronze-ingestion:
+    build:
+      context: ./services/bronze-ingestion
+    container_name: bronze-ingestion-submit
+    networks:
+      - streaming-net
+    environment:
+      - KAFKA_BROKER=redpanda-0:29092,redpanda-1:29092,redpanda-2:29092
+      - ICEBERG_CATALOG_URI=http://iceberg-catalog:8181
+      - ICEBERG_WAREHOUSE=s3://iceberg-warehouse/
+      - S3_ENDPOINT=http://minio:9000
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        flink run -m jobmanager:8081 -d /opt/job/bronze-ingestion-job.jar \
+          --kafka-broker $${KAFKA_BROKER} \
+          --catalog-uri $${ICEBERG_CATALOG_URI} \
+          --warehouse $${ICEBERG_WAREHOUSE} \
+          --s3-endpoint $${S3_ENDPOINT}
+    restart: "no"
+    depends_on:
+      jobmanager:
+        condition: service_started
+      taskmanager:
+        condition: service_started
+      topic-init:
+        condition: service_completed_successfully
+      iceberg-catalog:
+        condition: service_started
