@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY payment_gateway_producer.py .
 COPY identity_risk_producer.py .
 COPY hot_key_utils.py .
+COPY schema_registry_client.py .
 
 # overridden per-service in docker-compose
 CMD ["python", "payment_gateway_producer.py"]

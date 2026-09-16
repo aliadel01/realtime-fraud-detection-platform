@@ -35,6 +35,8 @@ services:
       - "plaintext://0.0.0.0:29092,external://0.0.0.0:9092"
       - --advertise-kafka-addr
       - "plaintext://redpanda-0:29092,external://localhost:9092"
+      - --schema-registry-addr
+      - "0.0.0.0:18081"
       - --rpc-addr
       - "0.0.0.0:33145"
       - --advertise-rpc-addr
@@ -43,6 +45,7 @@ services:
       - redpanda-0-data:/var/lib/redpanda/data
     ports:
       - "9092:9092"
+      - "18081:18081"
     networks:
       - streaming-net
     healthcheck:
@@ -163,8 +166,11 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        rpk topic create transactions.raw --partitions 12 --replicas 3 --brokers redpanda-0:29092,redpanda-1:29092,redpanda-2:29092 || true
-        rpk topic create identities.raw --partitions 12 --replicas 3 --brokers redpanda-0:29092,redpanda-1:29092,redpanda-2:29092 || true
+        rpk topic create transactions.raw --partitions 12 --replicas 3 --brokers redpanda-0:29092 || true
+        rpk topic create identities.raw --partitions 12 --replicas 3 --brokers redpanda-0:29092 || true
+        curl -X PUT -H "Content-Type: application/vnd.schemaregistry.v1+json" \
+             --data '{"compatibility": "BACKWARD"}' \
+             http://redpanda-0:18081/config || true
     restart: "no"
     deploy:
       resources:
@@ -201,11 +207,14 @@ services:
       - TRANSACTIONS_PATH=/app/data/train_transaction.csv
       - KAFKA_BROKER=redpanda-0:29092,redpanda-1:29092,redpanda-2:29092
       - HOT_KEYS_PATH=/app/shared/hot_keys.json
+      - SCHEMA_REGISTRY_URL=http://redpanda-0:18081
+      - TRANSACTION_AVSC_PATH=/app/avro_schemas/transaction_v1.avsc
     networks:
       - streaming-net
     volumes:
       - ./data/train_transaction.csv:/app/data/train_transaction.csv
       - ./data/hot_keys.json:/app/data/hot_keys.json
+      - ./avro_schemas:/app/avro_schemas:ro     
       - hot-keys-data:/app/shared
     depends_on:
       topic-init:
@@ -223,12 +232,15 @@ services:
       - IDENTITIES_PATH=/app/data/train_identity.csv
       - TRANSACTIONS_PATH=/app/data/train_transaction.csv
       - KAFKA_BROKER=redpanda-0:29092,redpanda-1:29092,redpanda-2:29092
+      - SCHEMA_REGISTRY_URL=http://redpanda-0:18081
       - HOT_KEYS_PATH=/app/shared/hot_keys.json
+      - TRANSACTION_AVSC_PATH=/app/avro_schemas/transaction_v1.avsc
     networks:
       - streaming-net
     volumes:
       - ./data/train_identity.csv:/app/data/train_identity.csv
       - ./data/train_transaction.csv:/app/data/train_transaction.csv
+      - ./avro_schemas:/app/avro_schemas:ro     
       - hot-keys-data:/app/shared
     depends_on:
       topic-init:
@@ -458,6 +470,7 @@ services:
       - ICEBERG_CATALOG_URI=http://iceberg-catalog:8181
       - ICEBERG_WAREHOUSE=s3://iceberg-warehouse/
       - S3_ENDPOINT=http://minio:9000
+      - SCHEMA_REGISTRY_URL=http://redpanda-0:18081 
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -465,7 +478,8 @@ services:
           --kafka-broker $${KAFKA_BROKER} \
           --catalog-uri $${ICEBERG_CATALOG_URI} \
           --warehouse $${ICEBERG_WAREHOUSE} \
-          --s3-endpoint $${S3_ENDPOINT}
+          --s3-endpoint $${S3_ENDPOINT} \
+          --schema-registry-url $${SCHEMA_REGISTRY_URL}
     restart: "no"
     depends_on:
       jobmanager:

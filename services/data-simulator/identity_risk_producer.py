@@ -20,14 +20,16 @@ Headers attach lineage: source-service, run-id, schema-version, event-time.
 
 Hot-key salting: build_key() from hot_key_utils — detect skewed card1, add salt to key to spread load across partitions.
 """
+
 import os
-import json
 import time
 import logging
 import pandas as pd
 import uuid
 from hot_key_utils import build_key
 from confluent_kafka import Producer
+from confluent_kafka.serialization import SerializationContext, MessageField
+from schema_registry_client import build_avro_value_serializer, build_key_serializer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("identity-risk")
@@ -35,6 +37,7 @@ log = logging.getLogger("identity-risk")
 IDENTITIES_PATH = os.environ["IDENTITIES_PATH"]
 TRANSACTIONS_PATH = os.environ["TRANSACTIONS_PATH"]
 KAFKA_BROKER = os.environ["KAFKA_BROKER"]
+AVSC_PATH = os.environ.get("IDENTITY_AVSC_PATH", "/app/avro_schemas/identity_v1.avsc")
 SPEED_FACTOR = 3600
 TOPIC = "identities.raw"
 MAX_SLEEP = float("2.0")
@@ -46,12 +49,12 @@ producer_conf = {
     "compression.type": "snappy",
     "acks": "all",
     "enable.idempotence": True,
-    "retries": 2147483647,           # let delivery.timeout.ms control retry budget, not this
-    "request.timeout.ms": 30000,     # wait per single request
-    "delivery.timeout.ms": 120000,   # total budget: queue -> success/fail, incl retries
+    "retries": 2147483647,
+    "request.timeout.ms": 30000,
+    "delivery.timeout.ms": 120000,
     "max.in.flight.requests.per.connection": 5,
     "batch.size": 32768,
-    "client.id": "identity-risk", 
+    "client.id": "identity-risk",
 }
 
 
@@ -60,8 +63,8 @@ def delivery_report(err, msg):
         log.error(f"delivery failed: {err}")
 
 
-def row_to_json(row):
-    return json.dumps(row.where(pd.notnull(row), None).to_dict())
+def row_to_dict(row: pd.Series) -> dict:
+    return row.where(pd.notnull(row), None).to_dict()
 
 
 def run():
@@ -73,12 +76,13 @@ def run():
         TRANSACTIONS_PATH, usecols=["TransactionID", "TransactionDT", "card1"]
     )
 
-    # join for pacing + key only, not fabricating identity content
     merged = idn.merge(tx_ref, on="TransactionID", how="left")
-    # rows with no match = orphan identity events, real source noise, keep as-is
     merged = merged.sort_values("TransactionDT", na_position="last").reset_index(drop=True)
 
     producer = Producer(producer_conf)
+    key_serializer = build_key_serializer()
+    schema_version, value_serializer = build_avro_value_serializer(AVSC_PATH)
+
     prev_dt = None
     total = len(merged)
     log.info(f"identity-risk starting: {total} events, speed_factor={SPEED_FACTOR}")
@@ -94,19 +98,20 @@ def run():
         if pd.notnull(current_dt):
             prev_dt = current_dt
 
-        # orphan record: no card1 match, use TransactionID as fallback key
-        card_key = build_key((str(row["card1"]))) if pd.notnull(row["card1"]) else str(row["TransactionID"])
+        card_key = build_key(str(row["card1"])) if pd.notnull(row["card1"]) else str(row["TransactionID"])
 
-        # drop join-only helper cols before sending, keep payload true to source
         payload_row = row.drop(labels=["TransactionDT", "card1"])
+        key_bytes = key_serializer(card_key, SerializationContext(TOPIC, MessageField.KEY))
+        value_bytes = value_serializer(row_to_dict(payload_row), SerializationContext(TOPIC, MessageField.VALUE))
+
         producer.produce(
             TOPIC,
-            key=card_key,
-            value=row_to_json(payload_row),
+            key=key_bytes,
+            value=value_bytes,
             headers=[
                 ("source-service", b"identity-risk"),
                 ("run-id", RUN_ID.encode("utf-8")),
-                ("schema-version", b"v1"),
+                ("schema-version", str(schema_version).encode("utf-8")),
                 ("event-time", str(current_dt).encode("utf-8")),
             ],
             callback=delivery_report,

@@ -49,6 +49,7 @@ public class BronzeIngestionJob {
         String catalogUri = params.get("catalog-uri", "http://iceberg-catalog:8181");
         String warehouse = params.get("warehouse", "s3://iceberg-warehouse/");
         String s3Endpoint = params.get("s3-endpoint", "http://minio:9000");
+        String schemaRegistryUrl = params.get("schema-registry-url", "http://redpanda-0:18081");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
@@ -97,7 +98,7 @@ public class BronzeIngestionJob {
                 .setTopics(topic)
                 .setGroupId("bronze-ingestion-" + consumerGroupSuffix)
                 .setStartingOffsets(OffsetsInitializer.earliest())
-                .setDeserializer(new KafkaRawRecordDeserializer())
+                .setDeserializer(new KafkaAvroRecordDeserializer(schemaRegistryUrl))
                 .build();
 
         DataStream<RawKafkaRecord> raw = env.fromSource(
