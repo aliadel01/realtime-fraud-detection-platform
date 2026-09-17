@@ -72,4 +72,3 @@ Before the streaming pipeline starts, `main()` calls `IcebergTableBootstrap.ensu
 ## Follow-ups
 
 - **Compaction.** Hourly partitions at a 5s commit interval will still accumulate many small files per partition over a busy hour. A scheduled Iceberg `rewrite_data_files` procedure (run via Spark or Flink batch, on a cron) is needed and is not part of this job — this job's only responsibility is correct, exactly-once ingestion.
-- **Schema evolution.** If the producers ever change their header set or the payload shape, `BRONZE_SCHEMA` is fixed at table-creation time. Iceberg supports schema evolution, but this job doesn't currently auto-detect or apply it — a deliberate scope cut, revisit if the header contract changes.
